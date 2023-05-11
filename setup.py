@@ -14,6 +14,7 @@ requirements = [
     "torch>=1.12.1",
     "torchvision>=0.13.1",
     "numpy>=1.23.2",
+    "Pillow>=9.2.0",
     "clip@git+https://github.com/openai/CLIP.git",
 ]
 
