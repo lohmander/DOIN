@@ -33,7 +33,7 @@ class SVODataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         item = self.get_svo_item(self.data[idx])
         img = self.transform(Image.open(os.path.join(self.img_dir, item.img_name)))
-        return img, item.caption, item.phrases, item.svos
+        return img, item.caption, item.phrases, torch.tensor(item.svos)
 
 
 _det_regex = re.compile(r"^(the|a|an|his|her|their|my|our|your|its)\s")
