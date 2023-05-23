@@ -208,6 +208,37 @@ class GraphDecoder(nn.Module):
         return p_x
 
 
+class GraphDecoder(nn.Module):
+    def __init__(self, d=512, num_layers=3):
+        super().__init__()
+
+        # Encoder that takes in k d-dimensional embeddings and
+        # applies multi head attention to highlight the embeddings
+        # that are the source or target of an edge
+        self.encoder = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(d_model=d, nhead=8, dim_feedforward=4 * d),
+            num_layers,
+            nn.LayerNorm(d),
+        )
+        self.sub_proj = MLP(d, d, 3)
+        self.obj_proj = MLP(d, d, 3)
+        self.verb_proj = MLP(d, d, 3)
+
+    def forward(self, x):
+        x = self.encoder(x)
+
+        sub = self.sub_proj(x)
+        obj = self.obj_proj(x)
+        verb = self.verb_proj(x)
+
+        sub = sub.unsqueeze(1) * verb.unsqueeze(2)
+        obj = obj.unsqueeze(1) * verb.unsqueeze(2)
+
+        x = sub @ obj.transpose(-2, -1)
+
+        return x
+
+
 class DOIN(nn.Module):
     def __init__(
         self,
@@ -224,6 +255,8 @@ class DOIN(nn.Module):
         transformer_width: int,
         transformer_heads: int,
         transformer_layers: int,
+        # graph
+        graph_decoder_layers: int,
     ):
         super().__init__()
 
@@ -252,7 +285,7 @@ class DOIN(nn.Module):
         self.logit_scale = nn.Parameter(torch.ones([]) * np.log(1 / 0.07))
 
         # interaction graph
-        self.graph_decoder = GraphDecoder(embed_dim, 3)
+        self.graph_decoder = GraphDecoder(embed_dim, graph_decoder_layers)
 
     def encode_image(self, image: Tensor):
         return self.visual(image)
