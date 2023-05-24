@@ -187,39 +187,6 @@ class GraphDecoder(nn.Module):
             num_layers,
             nn.LayerNorm(d),
         )
-        self.src_proj = MLP(d, d, 3)
-        self.tgt_proj = MLP(d, d, 3)
-        self.cond_proj = MLP(d, d, 3)
-        self.reduce_proj = MLP(d, 1, 3)
-
-    def forward(self, x):
-        x = self.encoder(x)
-        src = self.src_proj(x)
-        tgt = self.tgt_proj(x)
-        cond = self.cond_proj(x)
-
-        outer_prod = src @ tgt.transpose(-2, -1)
-
-        p_x = outer_prod.unsqueeze(-1).unsqueeze(-1)
-        cond = cond.unsqueeze(1).unsqueeze(1)
-        p_x = p_x * cond
-        p_x = self.reduce_proj(p_x).squeeze(-1)
-
-        return p_x
-
-
-class GraphDecoder(nn.Module):
-    def __init__(self, d=512, num_layers=3):
-        super().__init__()
-
-        # Encoder that takes in k d-dimensional embeddings and
-        # applies multi head attention to highlight the embeddings
-        # that are the source or target of an edge
-        self.encoder = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(d_model=d, nhead=8, dim_feedforward=4 * d),
-            num_layers,
-            nn.LayerNorm(d),
-        )
         self.sub_proj = MLP(d, d, 3)
         self.obj_proj = MLP(d, d, 3)
         self.verb_proj = MLP(d, d, 3)
