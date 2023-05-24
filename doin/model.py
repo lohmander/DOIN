@@ -282,7 +282,9 @@ class DOIN(nn.Module):
 
 
 class PhraseDecoder(nn.Module):
-    def __init__(self, embed_dim=512, eos_token_id=50256, gpt2_config=GPT2Config()):
+    def __init__(
+        self, embed_dim=512, eos_token_id=50256, gpt2_config=GPT2Config(n_layer=6)
+    ):
         super().__init__()
 
         self.eos_token_id = eos_token_id
@@ -305,7 +307,7 @@ class PhraseDecoder(nn.Module):
 
         assert len(embedding) == 1, "Can only decode one embedding at a time..?"
 
-        embedding = self.proj(embedding)[:, None]
+        embedding = self.emb_proj(embedding)[:, None]
         inputs_embeds = embedding
         output_idxs = []
 
