@@ -6,6 +6,7 @@ from doin.model import DOIN
 def build_model_from_clip(
     clip_model_type: Literal["ViT-B/32"] = "ViT-B/32",
     k_embeddings: int = 20,
+    graph_decoder_layers=3,
 ):
     """
     Builds a DOIN model with weights from the CLIP model
@@ -46,6 +47,7 @@ def build_model_from_clip(
         transformer_width,
         transformer_heads,
         transformer_layers,
+        graph_decoder_layers=graph_decoder_layers,
     )
     doin_state_dict = model.state_dict()
 
