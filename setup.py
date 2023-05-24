@@ -13,6 +13,7 @@ with open("HISTORY.rst") as history_file:
 requirements = [
     "torch>=1.12.1",
     "torchvision>=0.13.1",
+    "torchmetrics==0.11.4",
     "numpy>=1.23.2",
     "Pillow>=9.2.0",
     "clip@git+https://github.com/openai/CLIP.git",
