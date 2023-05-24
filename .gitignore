@@ -106,3 +106,5 @@ ENV/
 .idea/
 .DS_Store
 experiment
+doin_data
+*.pt
