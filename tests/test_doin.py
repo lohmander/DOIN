@@ -5,7 +5,7 @@
 
 import unittest
 
-from doin import doin
+from doin import build
 
 
 class TestDoin(unittest.TestCase):
