@@ -36,6 +36,18 @@ class SVODataset(torch.utils.data.Dataset):
         return img, item.caption, item.phrases, item.svos
 
 
+class DOINDataset(SVODataset):
+    def get_svo_item(self, data) -> SVOItem:
+        return SVOItem(
+            caption=data["caption"],
+            img_name=data["img"],
+            phrases=data["phrases"],
+            svos=torch.stack(data["svos"])
+            if data["source"] == "svo_probes" and len(data["svos"]) > 0
+            else torch.tensor(data["svos"]),
+        )
+
+
 _det_regex = re.compile(r"^(the|a|an|his|her|their|my|our|your|its)\s")
 
 
