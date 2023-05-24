@@ -109,3 +109,4 @@ ENV/
 *.jpg
 *.jpeg
 experiment.ipynb
+.DS_Store

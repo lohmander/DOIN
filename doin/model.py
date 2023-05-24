@@ -3,6 +3,7 @@ import numpy as np
 from typing import Tuple, Union
 from torch import Tensor, nn
 from clip.model import Transformer, LayerNorm
+from transformers import GPT2LMHeadModel, GPT2Config
 
 
 class MLP(nn.Module):
@@ -278,3 +279,69 @@ class DOIN(nn.Module):
             img_graph=img_graph_feats,
             txt_graph=txt_graph_feats,
         )
+
+
+class PhraseDecoder(nn.Module):
+    def __init__(self, embed_dim=512, eos_token_id=50256, gpt2_config=GPT2Config()):
+        super().__init__()
+
+        self.eos_token_id = eos_token_id
+
+        # causal language model for next token prediction
+        self.clm = GPT2LMHeadModel(gpt2_config)
+
+        # embedding projection
+        self.emb_proj = nn.Linear(embed_dim, self.clm.transformer.wte.weight.shape[1])
+
+    def generate(self, embedding, temperature=1, max_len=20):
+        """
+        Generate a phrase from an embedding using the causal language model.
+
+        Params:
+            embedding: (batch_size, embed_dim) phrase embedding tensor from the DOIN model
+            temperature: float, temperature for sampling from the softmax
+            max_len: int, maximum length of the generated phrase
+        """
+
+        assert len(embedding) == 1, "Can only decode one embedding at a time..?"
+
+        embedding = self.proj(embedding)[:, None]
+        inputs_embeds = embedding
+        output_idxs = []
+
+        for _ in range(max_len):
+            out_probs = self.clm(inputs_embeds=inputs_embeds)
+            last_token_probs = out_probs.logits[0, -1] / temperature
+            next_token_idx = torch.multinomial(last_token_probs.softmax(-1), 1)
+
+            if next_token_idx.item() == self.eos_token_id:
+                break
+
+            inputs_embeds = torch.cat(
+                (inputs_embeds, self.clm.get_input_embeddings()(next_token_idx)[None]),
+                1,
+            )
+            output_idxs.append(next_token_idx.item())
+
+        return output_idxs
+
+    def forward(self, batch):
+        """
+        Params:
+        batch: dict with keys "input_ids", "attention_mask", "phrases"
+        """
+        input_ids = batch["input_ids"]
+        phrase_embeds = self.emb_proj(self.doin.encode_phrase(batch["phrases"]))[
+            :, None
+        ]
+        inputs_embeds = self.clm.get_input_embeddings()(input_ids)
+        inputs_embeds = torch.cat((phrase_embeds, inputs_embeds), 1)
+
+        attention_mask_prompt_padding = torch.ones(
+            batch["attention_mask"].shape[0], 1, device=inputs_embeds.device
+        )
+        attention_mask = torch.cat(
+            (attention_mask_prompt_padding, batch["attention_mask"]), 1
+        )
+
+        return self.clm(inputs_embeds=inputs_embeds, attention_mask=attention_mask)
