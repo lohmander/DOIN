@@ -228,7 +228,7 @@ class SetAlignmentGraphLoss(nn.Module):
                 for i, (idx, pos_i) in enumerate(zip(indices, positives))
             ],
             1,
-        )
+        ).long()
 
         return batch_idxs, phrase_emb_idxs, input_emb_idxs
 
