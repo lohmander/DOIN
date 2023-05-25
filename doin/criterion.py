@@ -7,7 +7,7 @@ from scipy.optimize import linear_sum_assignment
 
 
 class GraphLoss(nn.Module):
-    def __init__(self, gamma=2, alpha=1 - 1 / 400):
+    def __init__(self, gamma=4, alpha=0.75):
         super().__init__()
 
         self.gamma = gamma
