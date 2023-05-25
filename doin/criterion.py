@@ -95,7 +95,7 @@ class AlignmentLoss(nn.Module):
         """
         batch_idxs, phrase_emb_idxs, input_emb_idxs = indices
         num_negatives = self.num_hard_negatives + self.num_random_negatives
-        k_embeddings = similarity_matrix.size(1)
+        k_embeddings = similarity_matrix.size(-1)
 
         # clone the similarity matrix and set the positive examples to -inf such that they are not selected as negatives
         neg_sim = similarity_matrix.clone()
@@ -221,7 +221,7 @@ class SetAlignmentGraphLoss(nn.Module):
                 torch.stack(
                     [
                         torch.full((len(pos_i),), i, device=C.device),
-                        torch.as_tensor(idx[0], device=C.device),
+                        torch.as_tensor(pos_i, device=C.device),
                         torch.as_tensor(idx[1], device=C.device),
                     ]
                 )
@@ -249,6 +249,9 @@ class SetAlignmentGraphLoss(nn.Module):
             positives: list of lists of positive indices for each batch instance
             svos: list of lists of SVO triplets for each batch instance
             temperature: temperature for the softmax function (in CE)
+
+        Returns:
+            losses: dict of losses (triplet, ce, graph)
         """
         indices = self.get_indices(phrase_embeddings, input_embeddings, positives)
         losses = {}
@@ -259,3 +262,6 @@ class SetAlignmentGraphLoss(nn.Module):
         losses.update(self.graph(graph_probs, svos, indices))
 
         return losses
+
+
+# %%
