@@ -260,12 +260,17 @@ class DOIN(nn.Module):
 
     def encode_text(self, text: Tensor):
         return self.language(text)[1]
-        return single[1]
 
     def encode_phrase(self, text: Tensor):
         return self.language(text)[0]
 
-    def forward(self, images, texts, phrases):
+    def forward(self, images: Tensor, texts: Tensor, phrases: Tensor):
+        """
+        Params:
+            images: (N, 3, H, W)
+            texts: (N, L)
+            phrases: (m, L)
+        """
         img_feats = self.encode_image(images)
         txt_feats = self.encode_text(texts)
         phrase_feats = self.encode_phrase(phrases)

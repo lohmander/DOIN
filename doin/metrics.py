@@ -1,116 +1,132 @@
 import torch
-import torchmetrics as tm
 import torch.nn.functional as F
 from typing import List, Tuple
 from torch import Tensor, nn
+from torchmetrics import (
+    AUROC,
+    AveragePrecision,
+    RetrievalMAP,
+    RetrievalMRR,
+    RetrievalNormalizedDCG,
+)
+from doin.matcher import Matcher
 
 
-class DOINMetrics(nn.Module):
-    def __init__(self, graph_thresholds=[0.25, 0.5, 0.75]):
+class DOINMetrics(nn.Module, Matcher):
+    def __init__(self):
         super().__init__()
 
-        self.graph_thresholds = graph_thresholds
+        self.rmap = RetrievalMAP()
+        self.rmrr = RetrievalMRR()
+        self.rdcg = RetrievalNormalizedDCG()
+        self.auroc = AUROC(task="binary")
+        self.ap = AveragePrecision(task="binary")
 
-        self.retrieval_map = tm.RetrievalMAP()
-        self.accuracy = tm.Accuracy(task="binary")
-        self.f1 = tm.F1Score(task="binary")
-        self.precision = tm.Precision(task="binary")
-        self.recall = tm.Recall(task="binary")
+    def compute_graph_metrics(
+        self,
+        graph_input: Tensor,
+        svos: List[List[Tuple[int, int, int]]],
+        indices: Tuple[Tensor, Tensor, Tensor],
+    ):
+        """
+        Params:
+            graph_input: (N, k, k, k) tensor of graph probabilities p(x_i -> x_j | x_k)
+            svos: lists of SVO triplets for each batch instance
+            indices: a tuple of (batch_idxs, phrase_emb_idxs, input_emb_idxs)
+        """
+
+        batch_size = graph_input.size(0)
+        batch_idxs, phrase_emb_idxs, input_emb_idxs = indices
+        graph_target = torch.full_like(graph_input, 0, dtype=torch.long)
+        emb_idx_mapping = {}
+
+        # create a mapping dict from SVO phrase indices to embedding indices
+        for batch_idx, phrase_emb_idx, input_emb_idx in zip(
+            batch_idxs.tolist(), phrase_emb_idxs.tolist(), input_emb_idxs.tolist()
+        ):
+            if phrase_emb_idx not in emb_idx_mapping:
+                emb_idx_mapping[phrase_emb_idx] = {}
+
+            emb_idx_mapping[phrase_emb_idx][batch_idx] = input_emb_idx
+
+        # assign ground truth labels to the target adjacency cube tensor
+        for i, svos_i in enumerate(svos):
+            for s, v, o in svos_i:
+                graph_target[
+                    i,
+                    emb_idx_mapping[s][i],
+                    emb_idx_mapping[o][i],
+                    emb_idx_mapping[v][i],
+                ] = 1
+
+        # flatten both input and target
+        graph_input, graph_target = graph_input.flatten(), graph_target.flatten()
+
+        return dict(
+            graph_auroc=self.auroc(graph_input, graph_target),
+            graph_ap=self.ap(graph_input, graph_target),
+        )
+
+    def compute_retrieval_metrics(
+        self,
+        input_embeddings: Tensor,
+        phrase_embeddings: Tensor,
+        positives: List[List[int]],
+    ):
+        similarities = (
+            F.normalize(input_embeddings, dim=-1)
+            @ F.normalize(phrase_embeddings, dim=-1).T
+        )
+
+        indices, preds, gts = zip(
+            *[
+                (i, val, j in pos)
+                for i, (sim, pos) in enumerate(zip(similarities, positives))
+                for j, val in enumerate(sim.T.max(-1).values)
+                if val > 0.0
+            ]
+        )
+        indices, preds, gts = (
+            torch.tensor(indices, device=input_embeddings.device),
+            torch.stack(preds),
+            torch.tensor(gts, device=input_embeddings.device),
+        )
+
+        return dict(
+            retrieval_map=self.rmap(preds, gts, indexes=indices),
+            retrieval_mrr=self.rmrr(preds, gts, indexes=indices),
+            retrieval_dcg=self.rdcg(preds, gts, indexes=indices),
+        )
 
     def forward(
         self,
         input_embeddings: Tensor,
         phrase_embeddings: Tensor,
-        graph_input: Tensor,
+        graph_probs: Tensor,
+        positives: List[List[int]],
         svos: List[List[Tuple[int, int, int]]],
     ):
         """
         Params:
-            input_embeddings: (N, k, d)
-            phrase_embeddings: (m, d)
-            graph_input: (N, k, k, k)
-            svos: List of lists of SVO triplets (one list per sample), essentially with shape (N, l, 3)
+            input_embeddings: (N, k, d) tensor of input embeddings
+            phrase_embeddings: (m, d) tensor of phrase embeddings
+            graph_probs: (N, k, k, k) tensor of graph probabilities
+            positives: list of lists of positive indices for each batch instance
+            svos: list of lists of SVO triplets for each batch instance
+
+        Returns:
+            metrics: dict of metrics (graph_auroc)
         """
-
-        similarities = (
-            F.normalize(input_embeddings, dim=-1)
-            @ F.normalize(phrase_embeddings, dim=-1).T
-        )
-        graphs = graph_input.sigmoid()
-        preds = {}
-        threshold = min(self.graph_thresholds)
-
-        for sim_i, graph_i, svos_i in zip(similarities, graphs, svos):
-            preds_i = {}
-
-            for edge in (graph_i >= threshold).nonzero():
-                s, o, v = edge.tolist()
-                svo = (
-                    sim_i[s].argmax(-1).item(),
-                    sim_i[v].argmax(-1).item(),
-                    sim_i[o].argmax(-1).item(),
-                )
-                preds_i[svo] = max(preds_i.get(svo, 0), graph_i[s, o, v].item())
-
-            for svo in set(list(preds_i.keys()) + svos_i):
-                if svo not in preds:
-                    preds[svo] = dict(true=[], pred=[])
-
-                preds[svo]["true"].append(1.0 if svo in svos_i else 0.0)
-                preds[svo]["pred"].append(preds_i.get(svo, 0.0))
-
-        y_pred = []
-        y_true = []
-        y_idx = []
-
-        for i, (_, y) in enumerate(preds.items()):
-            y_pred.extend(y["pred"])
-            y_true.extend(y["true"])
-            y_idx.extend([i] * len(y["true"]))
-
-        y_pred, y_true, y_idx = (
-            torch.tensor(y_pred),
-            torch.tensor(y_true).bool(),
-            torch.tensor(y_idx),
-        )
-
-        ret_y_pred = y_pred[y_pred > 0]
-        ret_y_true = y_true[y_pred > 0]
-        ret_y_idx = y_idx[y_pred > 0]
-
+        indices = self.get_indices(phrase_embeddings, input_embeddings, positives)
         metrics = {}
-
-        for threshold in self.graph_thresholds:
-            mask = y_pred > threshold
-            metrics.update(
-                {
-                    f"svo_{threshold}_accuracy": self.accuracy(
-                        y_pred[mask], y_true[mask]
-                    )
-                    if mask.sum() > 0
-                    else 0,
-                    f"svo_{threshold}_f1": self.f1(y_pred[mask], y_true[mask])
-                    if mask.sum() > 0
-                    else 0,
-                    f"svo_{threshold}_precision": self.precision(
-                        y_pred[mask], y_true[mask]
-                    )
-                    if mask.sum() > 0
-                    else 0,
-                    f"svo_{threshold}_recall": self.recall(y_pred[mask], y_true[mask])
-                    if mask.sum() > 0
-                    else 0,
-                }
-            )
-
+        metrics.update(self.compute_graph_metrics(graph_probs, svos, indices))
         metrics.update(
-            {
-                "svo_retrieval_map": self.retrieval_map(
-                    ret_y_pred, ret_y_true, indexes=ret_y_idx
-                )
-                if len(ret_y_true) > 0
-                else 0.0,
-            }
+            self.compute_retrieval_metrics(
+                input_embeddings, phrase_embeddings, positives
+            )
         )
 
         return metrics
+
+
+# Metrics()(img_embs, pemb, graph_probs, positives, svos)
