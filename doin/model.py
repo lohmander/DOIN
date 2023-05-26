@@ -190,21 +190,21 @@ class GraphDecoder(nn.Module):
         )
         self.sub_proj = MLP(d, d, 3)
         self.obj_proj = MLP(d, d, 3)
-        self.verb_proj = MLP(d, d, 3)
+        self.verb_sub_proj = MLP(d, d, 3)
+        self.verb_obj_proj = MLP(d, d, 3)
 
     def forward(self, x):
         x = self.encoder(x)
 
         sub = self.sub_proj(x)
         obj = self.obj_proj(x)
-        verb = self.verb_proj(x)
 
-        sub = sub.unsqueeze(1) * verb.unsqueeze(2)
-        obj = obj.unsqueeze(1) * verb.unsqueeze(2)
+        sub = sub.unsqueeze(1) * self.verb_sub_proj(x).unsqueeze(2)
+        obj = obj.unsqueeze(1) * self.verb_obj_proj(x).unsqueeze(2)
 
-        x = sub @ obj.transpose(-2, -1)
+        p_x = sub @ obj.transpose(-2, -1)
 
-        return x
+        return p_x
 
 
 class DOIN(nn.Module):
