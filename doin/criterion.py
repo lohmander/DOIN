@@ -60,7 +60,7 @@ class GraphLoss(nn.Module):
                 alpha=self.alpha,
                 reduction="sum",
             )
-            / batch_size
+            / graph_target.sum()
         )
 
 
