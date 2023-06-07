@@ -320,11 +320,10 @@ class DOIN(nn.Module):
         self.graph_decoder = GraphDecoder(embed_dim, graph_decoder_layers)
 
     def encode_image(self, image: Tensor, need_weights: bool = False):
-        assert self.training != need_weights, "need_weights only works in eval mode"
-
         x, attn_weights = self.visual(image)
 
         if need_weights:
+            assert self.training != need_weights, "need_weights only works in eval mode"
             return x, attn_weights
 
         return x
