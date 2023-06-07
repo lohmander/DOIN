@@ -1,8 +1,9 @@
 import torch
 import numpy as np
 from typing import Tuple, Union
+from collections import OrderedDict
 from torch import Tensor, nn
-from clip.model import Transformer, LayerNorm
+from clip.model import Transformer, LayerNorm, QuickGELU
 from transformers import GPT2LMHeadModel, GPT2Config
 
 
@@ -23,6 +24,69 @@ class MLP(nn.Module):
 
     def forward(self, x):
         return self.mlp(x)
+
+
+class ResidualAttentionBlock(nn.Module):
+    """
+    Adapted from <https://github.com/openai/CLIP> to return attention weights in inference mode
+    """
+
+    def __init__(self, d_model: int, n_head: int, attn_mask: torch.Tensor = None):
+        super().__init__()
+
+        self.attn = nn.MultiheadAttention(d_model, n_head)
+        self.ln_1 = LayerNorm(d_model)
+        self.mlp = nn.Sequential(
+            OrderedDict(
+                [
+                    ("c_fc", nn.Linear(d_model, d_model * 4)),
+                    ("gelu", QuickGELU()),
+                    ("c_proj", nn.Linear(d_model * 4, d_model)),
+                ]
+            )
+        )
+        self.ln_2 = LayerNorm(d_model)
+        self.attn_mask = attn_mask
+
+    def attention(self, x: torch.Tensor):
+        self.attn_mask = (
+            self.attn_mask.to(dtype=x.dtype, device=x.device)
+            if self.attn_mask is not None
+            else None
+        )
+        return self.attn(
+            x, x, x, need_weights=not self.training, attn_mask=self.attn_mask
+        )
+
+    def forward(self, x: torch.Tensor):
+        attn_x, attn_weights = self.attention(self.ln_1(x))
+        x = x + attn_x
+        x = x + self.mlp(self.ln_2(x))
+        return x, attn_weights
+
+
+class Transformer(nn.Module):
+    def __init__(
+        self, width: int, layers: int, heads: int, attn_mask: torch.Tensor = None
+    ):
+        super().__init__()
+        self.width = width
+        self.layers = layers
+        self.resblocks = nn.ModuleList(
+            [ResidualAttentionBlock(width, heads, attn_mask) for _ in range(layers)]
+        )
+
+    def forward(self, x: torch.Tensor):
+        attn_weights = []
+
+        for resblock in self.resblocks:
+            x, weights = resblock(x)
+            attn_weights.append(weights.detach())
+
+        if attn_weights:
+            attn_weights = torch.stack(attn_weights)
+
+        return x, attn_weights
 
 
 class VisionTransformer(nn.Module):
@@ -88,7 +152,7 @@ class VisionTransformer(nn.Module):
         x = self.ln_pre(x)
 
         x = x.permute(1, 0, 2)  # NLD -> LND
-        x = self.transformer(x)
+        x, attn_weights = self.transformer(x)
         x = x.permute(1, 0, 2)  # LND -> NLD
 
         x = self.ln_post(x[:, : self.k_embeddings, :])
@@ -96,7 +160,7 @@ class VisionTransformer(nn.Module):
         if self.proj is not None:
             x = x @ self.proj
 
-        return x
+        return x, attn_weights
 
 
 class LanguageTransformer(nn.Module):
@@ -165,7 +229,7 @@ class LanguageTransformer(nn.Module):
 
         x = x + self.positional_embedding
         x = x.permute(1, 0, 2)
-        x = self.transformer(x)
+        x, _ = self.transformer(x)
         x = x.permute(1, 0, 2)
         x = self.ln_final(x)
 
@@ -255,8 +319,15 @@ class DOIN(nn.Module):
         # interaction graph
         self.graph_decoder = GraphDecoder(embed_dim, graph_decoder_layers)
 
-    def encode_image(self, image: Tensor):
-        return self.visual(image)
+    def encode_image(self, image: Tensor, need_weights: bool = False):
+        assert self.training != need_weights, "need_weights only works in eval mode"
+
+        x, attn_weights = self.visual(image)
+
+        if need_weights:
+            return x, attn_weights
+
+        return x
 
     def encode_text(self, text: Tensor):
         return self.language(text)[1]
