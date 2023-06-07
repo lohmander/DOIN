@@ -35,6 +35,24 @@ def build_model_from_clip(
         )
     )
 
+    config = dict(
+        k_embeddings=k_embeddings,
+        embed_dim=embed_dim,
+        image_resolution=image_resolution,
+        vision_layers=vision_layers,
+        vision_width=vision_width,
+        vision_patch_size=vision_patch_size,
+        context_length=context_length,
+        vocab_size=vocab_size,
+        transformer_width=transformer_width,
+        transformer_heads=transformer_heads,
+        transformer_layers=transformer_layers,
+        graph_decoder_layers=graph_decoder_layers,
+    )
+
+    print("Building DOIN with config:")
+    print(config)
+
     model = DOIN(
         k_embeddings,
         embed_dim,
