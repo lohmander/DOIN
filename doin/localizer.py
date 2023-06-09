@@ -1,5 +1,8 @@
 import torch
+import torchvision
+import torch.nn.functional as F
 from torch import Tensor, nn
+from scipy.optimize import linear_sum_assignment
 
 
 class DOINLocalizationPostProcessor(nn.Module):
@@ -117,16 +120,30 @@ class DOINLocalizationPostProcessor(nn.Module):
         )
 
         out = []
+        foci = []
 
-        for bbox, score, mask in zip(bboxes, scores, masks):
+        if bboxes.shape[0] == 0:
+            return out
+
+        for bbox, mask in zip(bboxes, masks):
             inside_attn = attn_weights.cumsum(dim=1)[
                 0, -1, : self.k_embeddings, self.k_embeddings :
             ][:, mask].sum(-1)
-            outside_attn = attn_weights.cumsum(dim=1)[
-                0, -1, : self.k_embeddings, self.k_embeddings :
-            ][:, ~mask].sum(-1)
-            embedding_focus = inside_attn / outside_attn
-            img_embedding_idx = embedding_focus.argmax(-1)
+            # outside_attn = attn_weights.cumsum(dim=1)[
+            #     0, -1, : self.k_embeddings, self.k_embeddings :
+            # ][:, ~mask].sum(-1)
+            embedding_focus = inside_attn  # / outside_attn
+            foci.append(embedding_focus)
+
+        foci = torch.stack(foci)
+
+        if torch.isnan(foci).any() or torch.isinf(foci).any():
+            return out
+
+        _, img_emb_idxs = linear_sum_assignment(-foci.cpu().numpy())
+
+        for img_embedding_idx, bbox, score in zip(img_emb_idxs, bboxes, scores):
+            # img_embedding_idx = embedding_focus.argmax(-1)
             phrase_similarity, phrase_idx = similarities[img_embedding_idx].max(-1)
 
             out.append(
