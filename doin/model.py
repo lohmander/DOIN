@@ -81,7 +81,9 @@ class Transformer(nn.Module):
 
         for resblock in self.resblocks:
             x, weights = resblock(x)
-            attn_weights.append(weights.detach())
+
+            if not self.training:
+                attn_weights.append(weights.detach())
 
         if attn_weights:
             attn_weights = torch.stack(attn_weights)
